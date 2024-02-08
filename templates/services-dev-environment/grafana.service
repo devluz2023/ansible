@@ -1,0 +1,12 @@
+[Unit]
+Description=Istio Grafana Dashboard
+After=network.target
+
+[Service]
+ExecStart=istioctl dashboard grafana
+Restart=always
+User=ubuntu
+Environment=HOME=/home/ubuntu
+
+[Install]
+WantedBy=multi-user.target

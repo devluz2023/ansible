@@ -1,0 +1,33 @@
+# VPN network configuration
+server 10.8.0.0 255.255.255.0
+
+# Log verbosity level
+verb 3
+
+# Key and certificate files
+key server.key
+ca ca.crt
+cert server.crt
+dh dh.pem
+tls-auth ta.key 0
+
+# Protocol and port
+proto udp
+port 1194
+
+# Device type
+dev tun
+
+# User and group settings
+user nobody
+group nogroup
+
+# Persist key and tunnel settings
+persist-key
+persist-tun
+
+# Status log file
+status /var/log/openvpn-status.log
+
+# Log files
+log-append  /var/log/openvpn.log

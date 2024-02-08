@@ -1,0 +1,18 @@
+[Unit]
+Description=Apache Kafka
+Documentation=http://kafka.apache.org/documentation.html
+Requires=network.target remote-fs.target
+After=network.target remote-fs.target
+Environment="KAFKA_HEAP_OPTS=-Duser.dir=/opt/kafka/kafka_2.13-3.6.1"
+
+[Service]
+Type=simple
+User=kafka # Change this to your username
+ExecStart=/opt/kafka/kafka_2.13-3.6.1/bin/kafka-server-start.sh /opt/kafka/kafka_2.13-3.6.1/config/server.properties
+ExecStop=/opt/kafka/kafka_2.13-3.6.1/bin/kafka-server-stop.sh
+Restart=on-abnormal
+
+[Install]
+WantedBy=multi-user.target
+
+

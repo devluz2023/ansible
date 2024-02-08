@@ -1,0 +1,13 @@
+
+[Unit]
+Description=Istio Kiali Dashboard
+After=network.target
+
+[Service]
+ExecStart=istioctl dashboard kiali
+Restart=always
+User=ubuntu
+Environment=HOME=/home/ubuntu
+
+[Install]
+WantedBy=multi-user.target

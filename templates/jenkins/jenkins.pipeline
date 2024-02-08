@@ -1,0 +1,109 @@
+pipeline {
+    agent any
+    environment {
+      
+        IMAGE_TAG = 'latest' // or use ${env.BUILD_NUMBER}
+        REPOSITORY_NAME_BITBUCKET = ''
+        PROJECT_BITBUCKET = ''
+        REGISTRY = ''
+        ECR_REPOSITORY = "${REPOSITORY_NAME_BITBUCKET}"
+        NAMESPACE = ''
+        CONTAINER_PORT = 8080
+        REDGION = ''
+        CLUSTER_NAME = ''
+    }
+
+    stages {
+        stage('SCM') {
+            steps {
+                script {
+                    try {
+                        git branch: 'master',
+                            credentialsId: 'gitcredentials',
+                            url: "git@bitbucket.org:${PROJECT_BITBUCKET}/${REPOSITORY_NAME_BITBUCKET}.git"
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        error("Failed in SCM stage: ${e.message}")
+                    }
+                }
+            }
+        }
+       stage('SonarQube Analysis') {
+            steps {
+                script {
+                    try {
+                        withCredentials([string(credentialsId: 'sonarqube-app', variable: 'SONAR_TOKEN')]) {
+                            def scannerHome = tool 'SonarScanner'
+                            def projectName = "${REPOSITORY_NAME_BITBUCKET}"
+                            def sonarHostUrl = "http://localhost:9000"
+                            echo "Creating SonarQube project..."
+                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=${projectName} -Dsonar.python.version=3 -Dsonar.host.url=${sonarHostUrl} -Dsonar.login=${SONAR_TOKEN}"
+                        }
+                    } catch (Exception e) {
+                        slackSend(color: '#FF0000', message: "Failed to scan on sonar stage: ${e.message}")
+                        error("Failed to Scan: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to ECR') {
+            steps {
+                script {
+                    try {
+                        def ecrRepoName = "${REPOSITORY_NAME_BITBUCKET}"
+                        withAWS(credentials: 'app_server_user_aws', region: ${REGION}) {
+                            def repoExists = sh(script: "aws ecr describe-repositories --repository-names ${ecrRepoName} --region ${REGION}", returnStatus: true)
+                            if (repoExists != 0) {
+                                sh "aws ecr create-repository --repository-name ${ecrRepoName} --region ${REGION}"
+                            }
+                        }
+                        def app = docker.build("${REPOSITORY_NAME_BITBUCKET}:latest", ".")
+                        sh "docker images"
+                        sh "docker tag ${REPOSITORY_NAME_BITBUCKET}:latest ${ECR_REPOSITORY}:latest"
+                        docker.withRegistry(REGISTRY, 'ecr:${REGION}:app_server_user_aws') {
+                            sh "docker push ${ECR_REPOSITORY}:latest"
+                        }
+                    } catch (Exception e) {
+                        slackSend(color: '#FF0000', message: "Failed in Deploy to ECR stage: ${e.message}")
+                        error("Failed in Deploy to ECR stage: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    try {
+                        configFileProvider([configFile(fileId: '802da2f8-26d1-4121-9cf0-fde95fc61554', variable: 'K8S_MANIFEST')]) {
+                            withAWS(credentials: 'app_server_user_aws', region: '${REGION}') {
+                                def ecrRepoName = "${REPOSITORY_NAME_BITBUCKET}"
+                                sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
+                                def newImage = "${ECR_REPOSITORY}:latest"
+                                sh "sed -i 's/REPOSITORY_NAME_BITBUCKET/${REPOSITORY_NAME_BITBUCKET}/g' ${K8S_MANIFEST}"
+                                sh "sed -i 's/NAMESPACE_PARAMETER/${NAMESPACE}/g' ${K8S_MANIFEST}"
+                                sh "sed -i 's/CONTAINER_PORT_PARAMETER/${CONTAINER_PORT}/g' ${K8S_MANIFEST}"
+                                sh "sed -i 's|${ecrRepoName}:18|${newImage}|g' ${K8S_MANIFEST}"
+                                echo "Kubernetes Manifest Content:"
+                                sh "cat ${K8S_MANIFEST}"
+                                sh "kubectl apply -f ${K8S_MANIFEST}"
+                            }
+                        }
+                    } catch (Exception e) {
+                        slackSend(color: '#FF0000', message: "Failed in Deploy to Kubernetes stage: ${e.message}")
+                        error("Failed in Deploy to Kubernetes stage: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        stage('Notify Slack') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    slackSend(color: '#00FF00', message: "${REPOSITORY_NAME_BITBUCKET} Project deployed on eks sucessfull ")
+                }
+            }
+        }
+    } // End of stages
+} // End of pipeline
